@@ -29,10 +29,7 @@ services:
 
 
   front:
-    build:
-      context: ../..
-      dockerfile: front/Dockerfile
-    #image: thecodingmachine/workadventure-front:master
+    image: thecodingmachine/nodejs:14
     environment:
       DEBUG_MODE: "$DEBUG_MODE"
       JITSI_URL: $JITSI_URL
@@ -42,6 +39,9 @@ services:
       TURN_USER: "${TURN_USER}"
       TURN_PASSWORD: "${TURN_PASSWORD}"
       START_ROOM_URL: "${START_ROOM_URL}"
+    command: yarn run start
+    volumes:
+      - ./front:/usr/src/app
     labels:
       - "traefik.http.routers.front.rule=Host(`play.${DOMAIN}`)"
       - "traefik.http.routers.front.entryPoints=web,traefik"
@@ -54,10 +54,7 @@ services:
     restart: unless-stopped
 
   pusher:
-    build:
-      context: ../..
-      dockerfile: pusher/Dockerfile
-    #image: thecodingmachine/workadventure-pusher:master
+    image: thecodingmachine/nodejs:12
     command: yarn run runprod
     environment:
       SECRET_JITSI_KEY: "$SECRET_JITSI_KEY"
@@ -74,14 +71,15 @@ services:
       - "traefik.http.routers.pusher-ssl.tls=true"
       - "traefik.http.routers.pusher-ssl.service=pusher"
       - "traefik.http.routers.pusher-ssl.tls.certresolver=myresolver"
+    volumes:
+      - ./pusher:/usr/src/app
     restart: unless-stopped
 
   back:
-    build:
-      context: ../..
-      dockerfile: back/Dockerfile
-    #image: thecodingmachine/workadventure-back:master
+    image: thecodingmachine/nodejs:12
     command: yarn run runprod
+    volumes:
+      - ./back:/usr/src/app
     environment:
       SECRET_JITSI_KEY: "$SECRET_JITSI_KEY"
       ADMIN_API_TOKEN: "$ADMIN_API_TOKEN"
