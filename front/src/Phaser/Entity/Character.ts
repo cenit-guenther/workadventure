@@ -1,36 +1,48 @@
-import {PlayerAnimationNames} from "../Player/Animation";
+import {PlayerAnimationDirections, PlayerAnimationTypes} from "../Player/Animation";
 import {SpeechBubble} from "./SpeechBubble";
 import BitmapText = Phaser.GameObjects.BitmapText;
 import Container = Phaser.GameObjects.Container;
 import Sprite = Phaser.GameObjects.Sprite;
 import {TextureError} from "../../Exception/TextureError";
+import {Companion} from "../Companion/Companion";
+import type {GameScene} from "../Game/GameScene";
+import {DEPTH_INGAME_TEXT_INDEX} from "../Game/DepthIndexes";
+import {waScaleManager} from "../Services/WaScaleManager";
+
+const playerNameY = - 25;
 
 interface AnimationData {
     key: string;
     frameRate: number;
     repeat: number;
     frameModel: string; //todo use an enum
-    frameStart: number;
-    frameEnd: number;
+    frames : number[]
 }
+
+const interactiveRadius = 35;
 
 export abstract class Character extends Container {
     private bubble: SpeechBubble|null = null;
     private readonly playerName: BitmapText;
     public PlayerValue: string;
     public sprites: Map<string, Sprite>;
-    private lastDirection: string = PlayerAnimationNames.WalkDown;
+    private lastDirection: PlayerAnimationDirections = PlayerAnimationDirections.Down;
     //private teleportation: Sprite;
     private invisible: boolean;
+    public companion?: Companion;
+    private emote: Phaser.GameObjects.Sprite | null = null;
+    private emoteTween: Phaser.Tweens.Tween|null = null;
 
-    constructor(scene: Phaser.Scene,
+    constructor(scene: GameScene,
                 x: number,
                 y: number,
                 texturesPromise: Promise<string[]>,
                 name: string,
-                direction: string,
+                direction: PlayerAnimationDirections,
                 moving: boolean,
-                frame?: string | number
+                frame: string | number,
+                companion: string|null,
+                companionTexturePromise?: Promise<string>
     ) {
         super(scene, x, y/*, texture, frame*/);
         this.PlayerValue = name;
@@ -44,18 +56,17 @@ export abstract class Character extends Container {
             this.invisible = false
         })
 
-        /*this.teleportation = new Sprite(scene, -20, -10, 'teleportation', 3);
-        this.teleportation.setInteractive();
-        this.teleportation.visible = false;
-        this.teleportation.on('pointerup', () => {
-            this.report.visible = false;
-            this.teleportation.visible = false;
-        });
-        this.add(this.teleportation);*/
-
-        this.playerName = new BitmapText(scene, 0,  - 25, 'main_font', name, 7);
-        this.playerName.setOrigin(0.5).setCenterAlign().setDepth(99999);
+        this.playerName = new BitmapText(scene, 0,  playerNameY, 'main_font', name, 7);
+        this.playerName.setOrigin(0.5).setCenterAlign().setDepth(DEPTH_INGAME_TEXT_INDEX);
         this.add(this.playerName);
+
+        if (this.isClickable()) {
+            this.setInteractive({
+                hitArea: new Phaser.Geom.Circle(0, 0, interactiveRadius),
+                hitAreaCallback: Phaser.Geom.Circle.Contains, //eslint-disable-line @typescript-eslint/unbound-method
+                useHandCursor: true,
+            });
+        }
 
         scene.add.existing(this);
 
@@ -68,7 +79,19 @@ export abstract class Character extends Container {
         this.setDepth(-1);
 
         this.playAnimation(direction, moving);
+        
+        if (typeof companion === 'string') {
+            this.addCompanion(companion, companionTexturePromise);
+        }
     }
+
+    public addCompanion(name: string, texturePromise?: Promise<string>): void {
+        if (typeof texturePromise !== 'undefined') {
+            this.companion = new Companion(this.scene, this.x, this.y, name, texturePromise);
+        }
+    }
+    
+    public abstract isClickable(): boolean;
 
     public addTextures(textures: string[], frame?: string | number): void {
         for (const texture of textures) {
@@ -76,12 +99,11 @@ export abstract class Character extends Container {
                 throw new TextureError('texture not found');
             }
             const sprite = new Sprite(this.scene, 0, 0, texture, frame);
-            sprite.setInteractive({useHandCursor: true});
             this.add(sprite);
             this.getPlayerAnimations(texture).forEach(d => {
                 this.scene.anims.create({
                     key: d.key,
-                    frames: this.scene.anims.generateFrameNumbers(d.frameModel, {start: d.frameStart, end: d.frameEnd}),
+                    frames: this.scene.anims.generateFrameNumbers(d.frameModel, {frames: d.frames}),
                     frameRate: d.frameRate,
                     repeat: d.repeat
                 });
@@ -96,37 +118,57 @@ export abstract class Character extends Container {
 
     private getPlayerAnimations(name: string): AnimationData[] {
         return [{
-            key: `${name}-${PlayerAnimationNames.WalkDown}`,
+            key: `${name}-${PlayerAnimationDirections.Down}-${PlayerAnimationTypes.Walk}`,
             frameModel: name,
-            frameStart: 0,
-            frameEnd: 2,
+            frames: [0, 1, 2, 1],
             frameRate: 10,
             repeat: -1
         }, {
-            key: `${name}-${PlayerAnimationNames.WalkLeft}`,
+            key: `${name}-${PlayerAnimationDirections.Left}-${PlayerAnimationTypes.Walk}`,
             frameModel: name,
-            frameStart: 3,
-            frameEnd: 5,
+            frames: [3, 4, 5, 4],
             frameRate: 10,
             repeat: -1
         }, {
-            key: `${name}-${PlayerAnimationNames.WalkRight}`,
+            key: `${name}-${PlayerAnimationDirections.Right}-${PlayerAnimationTypes.Walk}`,
             frameModel: name,
-            frameStart: 6,
-            frameEnd: 8,
+            frames: [6, 7, 8, 7],
             frameRate: 10,
             repeat: -1
         }, {
-            key: `${name}-${PlayerAnimationNames.WalkUp}`,
+            key: `${name}-${PlayerAnimationDirections.Up}-${PlayerAnimationTypes.Walk}`,
             frameModel: name,
-            frameStart: 9,
-            frameEnd: 11,
+            frames: [9, 10, 11, 10],
             frameRate: 10,
             repeat: -1
+        },{
+            key: `${name}-${PlayerAnimationDirections.Down}-${PlayerAnimationTypes.Idle}`,
+            frameModel: name,
+            frames: [1],
+            frameRate: 10,
+            repeat: 1
+        }, {
+            key: `${name}-${PlayerAnimationDirections.Left}-${PlayerAnimationTypes.Idle}`,
+            frameModel: name,
+            frames: [4],
+            frameRate: 10,
+            repeat: 1
+        }, {
+            key: `${name}-${PlayerAnimationDirections.Right}-${PlayerAnimationTypes.Idle}`,
+            frameModel: name,
+            frames: [7],
+            frameRate: 10,
+            repeat: 1
+        }, {
+            key: `${name}-${PlayerAnimationDirections.Up}-${PlayerAnimationTypes.Idle}`,
+            frameModel: name,
+            frames: [10],
+            frameRate: 10,
+            repeat: 1
         }];
     }
 
-    protected playAnimation(direction : string, moving: boolean): void {
+    protected playAnimation(direction : PlayerAnimationDirections, moving: boolean): void {
         if (this.invisible) return;
         for (const [texture, sprite] of this.sprites.entries()) {
             if (!sprite.anims) {
@@ -134,10 +176,9 @@ export abstract class Character extends Container {
                 return;
             }
             if (moving && (!sprite.anims.currentAnim || sprite.anims.currentAnim.key !== direction)) {
-                sprite.play(texture+'-'+direction, true);
+                sprite.play(texture+'-'+direction+'-'+PlayerAnimationTypes.Walk, true);
             } else if (!moving) {
-                sprite.anims.play(texture + '-' + direction, true);
-                sprite.anims.stop();
+                sprite.anims.play(texture + '-' + direction + '-'+PlayerAnimationTypes.Idle, true);
             }
         }
     }
@@ -157,20 +198,24 @@ export abstract class Character extends Container {
 
         // up or down animations are prioritized over left and right
         if (body.velocity.y < 0) { //moving up
-            this.lastDirection = PlayerAnimationNames.WalkUp;
-            this.playAnimation(PlayerAnimationNames.WalkUp, true);
+            this.lastDirection = PlayerAnimationDirections.Up;
+            this.playAnimation(PlayerAnimationDirections.Up, true);
         } else if (body.velocity.y > 0) { //moving down
-            this.lastDirection = PlayerAnimationNames.WalkDown;
-            this.playAnimation(PlayerAnimationNames.WalkDown, true);
+            this.lastDirection = PlayerAnimationDirections.Down;
+            this.playAnimation(PlayerAnimationDirections.Down, true);
         } else if (body.velocity.x > 0) { //moving right
-            this.lastDirection = PlayerAnimationNames.WalkRight;
-            this.playAnimation(PlayerAnimationNames.WalkRight, true);
+            this.lastDirection = PlayerAnimationDirections.Right;
+            this.playAnimation(PlayerAnimationDirections.Right, true);
         } else if (body.velocity.x < 0) { //moving left
-            this.lastDirection = PlayerAnimationNames.WalkLeft;
-            this.playAnimation(PlayerAnimationNames.WalkLeft, true);
+            this.lastDirection = PlayerAnimationDirections.Left;
+            this.playAnimation(PlayerAnimationDirections.Left, true);
         }
 
         this.setDepth(this.y);
+
+        if (this.companion) {
+            this.companion.setTarget(this.x, this.y, this.lastDirection);
+        }
     }
 
     stop(){
@@ -195,7 +240,84 @@ export abstract class Character extends Container {
                 this.scene.sys.updateList.remove(sprite);
             }
         }
+        this.list.forEach(objectContaining => objectContaining.destroy()) 
         super.destroy();
-        this.playerName.destroy();
+    }
+    
+    playEmote(emoteKey: string) {
+        this.cancelPreviousEmote();
+
+        const scalingFactor = waScaleManager.uiScalingFactor * 0.05;
+        const emoteY = -30 - scalingFactor * 10;
+        
+        this.playerName.setVisible(false);
+        this.emote = new Sprite(this.scene, 0,  0, emoteKey);
+        this.emote.setAlpha(0);
+        this.emote.setScale(0.1 * scalingFactor);
+        this.add(this.emote);
+        this.scene.sys.updateList.add(this.emote);
+        
+        this.createStartTransition(scalingFactor, emoteY);
+    }
+
+    private createStartTransition(scalingFactor: number, emoteY: number) {
+        this.emoteTween = this.scene.tweens.add({
+            targets: this.emote,
+            props: {
+                scale: scalingFactor,
+                alpha: 1,
+                y: emoteY,
+            },
+            ease: 'Power2',
+            duration: 500,
+            onComplete: () => {
+                this.startPulseTransition(emoteY, scalingFactor);
+            }
+        });
+    }
+
+    private startPulseTransition(emoteY: number, scalingFactor: number) {
+        this.emoteTween = this.scene.tweens.add({
+            targets: this.emote,
+            props: {
+                y: emoteY * 1.3,
+                scale: scalingFactor * 1.1
+            },
+            duration: 250,
+            yoyo: true,
+            repeat: 1,
+            completeDelay: 200,
+            onComplete: () => {
+                this.startExitTransition(emoteY);
+            }
+        });
+    }
+
+    private startExitTransition(emoteY: number) {
+        this.emoteTween = this.scene.tweens.add({
+            targets: this.emote,
+            props: {
+                alpha: 0,
+                y: 2 * emoteY,
+            },
+            ease: 'Power2',
+            duration: 500,
+            onComplete: () => {
+                this.destroyEmote();
+            }
+        });
+    }
+
+    cancelPreviousEmote() {
+        if (!this.emote) return;
+
+        this.emoteTween?.remove();
+        this.destroyEmote()
+    }
+
+    private destroyEmote() {
+        this.emote?.destroy();
+        this.emote = null;
+        this.playerName.setVisible(true);
     }
 }
